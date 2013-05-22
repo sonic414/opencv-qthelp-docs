@@ -1,8 +1,39 @@
-Index: doc/patch_qthelp.py
-===================================================================
---- doc/patch_qthelp.py	(revision 0)
-+++ doc/patch_qthelp.py	(working copy)
-@@ -0,0 +1,94 @@
+diff -Naur opencv-2.4.5_old/cmake/OpenCVDetectPython.cmake opencv-2.4.5_new/cmake/OpenCVDetectPython.cmake
+--- opencv-2.4.5_old/cmake/OpenCVDetectPython.cmake	2013-04-05 14:30:20.000000000 +0530
++++ opencv-2.4.5_new/cmake/OpenCVDetectPython.cmake	2013-05-21 12:52:37.541036434 +0530
+@@ -102,7 +102,7 @@
+   endif(NOT ANDROID AND NOT IOS)
+ 
+   if(BUILD_DOCS)
+-    find_host_program(SPHINX_BUILD sphinx-build)
++    find_host_program(SPHINX_BUILD sphinx-build2)
+     if(SPHINX_BUILD)
+         if(UNIX)
+             execute_process(COMMAND sh -c "${SPHINX_BUILD} -_ 2>&1 | sed -ne 1p"
+diff -Naur opencv-2.4.5_old/doc/CMakeLists.txt opencv-2.4.5_new/doc/CMakeLists.txt
+--- opencv-2.4.5_old/doc/CMakeLists.txt	2013-04-05 14:30:20.000000000 +0530
++++ opencv-2.4.5_new/doc/CMakeLists.txt	2013-05-22 11:45:18.976207095 +0530
+@@ -110,6 +110,16 @@
+     COMMENT "Generating Online Documentation"
+     )
+ 
++  add_custom_target(qthelp_docs
++                ${SPHINX_BUILD} -b qthelp -c ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/.. ./_qthelp
++                COMMAND ${PYTHON_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/patch_qthelp.py" ./_qthelp
++                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/mymath.sty ${CMAKE_CURRENT_BINARY_DIR}
++                DEPENDS ${OPENCV_DOC_DEPS}
++                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
++                COMMENT "Generating Qt Help Documentation"
++    )
++
++
+   if(ENABLE_SOLUTION_FOLDERS)
+     set_target_properties(html_docs PROPERTIES FOLDER "documentation")
+   endif()
+diff -Naur opencv-2.4.5_old/doc/patch_qthelp.py opencv-2.4.5_new/doc/patch_qthelp.py
+--- opencv-2.4.5_old/doc/patch_qthelp.py	1970-01-01 05:30:00.000000000 +0530
++++ opencv-2.4.5_new/doc/patch_qthelp.py	2013-05-22 11:52:22.522196000 +0530
+@@ -0,0 +1,95 @@
 +#!/usr/bin/python
 +
 +import re
@@ -10,19 +41,19 @@ Index: doc/patch_qthelp.py
 +import os.path
 +
 +def fix_qhp(cwd):
-+    keyword  = re.compile('^(\s*)\<keyword name="(.*\(C\+\+.+\))" ref="\(u\'(.+)\', u\'(.+)\'\)"\/>\s*$')
-+    refclean = re.compile('[^0-9a-zA-Z._\-#/\\\\~\[\]\=]')
++    keyword  = '^(\s*)\<keyword name="((.+)\s\(.+\))"( id=\"(.+)\")? ref="(.+)\"\/>$'
++    refclean = '[^0-9a-zA-Z._\-#/\\\\~\[\]\=]'
 +    refrepl = '_'
 +    files = {} # files to fix
 +
 +    def repl(m):
-+        indent, name, id, ref = m.groups()
++        indent, name,nameextracted, idstring, keyid, ref = m.groups()
 +
 +        if '#' in ref:
 +            filename, refhash = ref.split('#', 1)
 +
 +            refhash = refhash.replace('&', '&amp;')
-+            cleanhash = refclean.sub('_', refhash)
++            cleanhash = re.sub(refclean,'_', refhash)
 +            ref = '#'.join([filename, cleanhash])
 +
 +            if filename in files:
@@ -30,11 +61,15 @@ Index: doc/patch_qthelp.py
 +            else:
 +                files[filename] = {(refhash, cleanhash)}
 +
-+        id = id.replace('<', '&lt;')
-+        id = id.replace('>', '&gt;')
++        if keyid is not None:
++            keyid = keyid.replace('<', '&lt;')
++            keyid = keyid.replace('>', '&gt;')
++            ret = '{0}<keyword name="{1}" id="cv::{2}" ref="{3}"/>\n'.format(indent, name, keyid, ref)
++            ret += '{0}<keyword name="{1}" id="{2}" ref="{3}"/>'.format(indent, name, keyid, ref)
++        else:
++            ret = '{0}<keyword name="{1}" id="cv::{2}" ref="{3}"/>\n'.format(indent, name, nameextracted, ref)
++            ret += '{0}<keyword name="{1}" id="{2}" ref="{3}"/>'.format(indent, name, nameextracted, ref)
 +
-+        ret = '{0}<keyword name="{1}" id="cv::{2}" ref="{3}"/>\n'.format(indent, name, id, ref)
-+        ret += '{0}<keyword name="{1}" id="{2}" ref="{3}"/>\n'.format(indent, name, id, ref)
 +        return ret
 +
 +    ret = ''
@@ -42,7 +77,7 @@ Index: doc/patch_qthelp.py
 +    with open(qhp_path, 'r') as f:
 +        for line in f:
 +            if '<keyword ' in line:
-+                line, n = keyword.subn(repl, line)
++                line, n = re.subn(keyword,repl, line)
 +                if not n:
 +                    continue
 +
@@ -64,8 +99,6 @@ Index: doc/patch_qthelp.py
 +
 +        os.rename(tfn, fn)
 +
-+
-+
 +def merge_css(src, dst, skip):
 +    if not os.path.exists(src):
 +        return
@@ -81,8 +114,7 @@ Index: doc/patch_qthelp.py
 +
 +    os.rename(src, dst)
 +
-+
-+if __name__ == '__main__':
++if __name__ == '__main__':    
 +    import argparse
 +    parser = argparse.ArgumentParser()
 +    parser.add_argument('targets',
@@ -97,34 +129,31 @@ Index: doc/patch_qthelp.py
 +        bcss, dcss = [os.path.join(docsdir, '_static', f) for f in ['basic.css', 'default.css']]
 +        merge_css(bcss, dcss, skip=6)
 +        fix_qhp(docsdir)
-Index: doc/CMakeLists.txt
-===================================================================
---- doc/CMakeLists.txt	(revision 6876)
-+++ doc/CMakeLists.txt	(working copy)
-@@ -52,6 +52,18 @@
-                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                 COMMENT "Generating Online Documentation")
- 
-+add_custom_target(qthelp_docs
-+                ${SPHINX_BUILD}
-+                  -b qthelp -c ${CMAKE_CURRENT_SOURCE_DIR}
-+                  ${CMAKE_CURRENT_SOURCE_DIR}/.. ./_qthelp
-+                COMMAND ${PYTHON_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/patch_qthelp.py" ./_qthelp
-+                COMMAND ${CMAKE_COMMAND} -E copy
-+                  ${CMAKE_CURRENT_SOURCE_DIR}/mymath.sty ${CMAKE_CURRENT_BINARY_DIR}
-+                DEPENDS ${OPENCV_DOC_DEPS}
-+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-+                COMMENT "Generating Qt Help Documentation"
-+                )
-+
- endif()
-         
- install(FILES ${FILES_DOC} DESTINATION "${OPENCV_DOC_INSTALL_PATH}" COMPONENT main)
-Index: doc/_themes/blue/layout.html
-===================================================================
---- doc/_themes/blue/layout.html	(revision 6876)
-+++ doc/_themes/blue/layout.html	(working copy)
-@@ -10,23 +10,6 @@
+diff -Naur opencv-2.4.5_old/doc/_themes/blue/layout.html opencv-2.4.5_new/doc/_themes/blue/layout.html
+--- opencv-2.4.5_old/doc/_themes/blue/layout.html	2013-04-05 14:30:20.000000000 +0530
++++ opencv-2.4.5_new/doc/_themes/blue/layout.html	2013-05-21 12:59:06.548590778 +0530
+@@ -18,20 +18,6 @@
+                          (sidebars != []) %}
+ {%- set url_root = pathto('', 1) %}
+ {%- if url_root == '#' %}{% set url_root = '' %}{% endif %}
+-<script type="text/javascript">
+-
+-  var _gaq = _gaq || [];
+-  _gaq.push(['_setAccount', 'UA-33108845-1']);
+-  _gaq.push(['_setDomainName', 'opencv.org']);
+-  _gaq.push(['_trackPageview']);
+-
+-  (function() {
+-    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+-    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+-    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+-  })();
+-
+-</script>
+ {%- macro relbar() %}
+     <div class="related">
+       <h3>{{ _('Navigation') }}</h3>
+@@ -176,23 +162,6 @@
            <div class="body">
              {% block body %} {% endblock %}
            </div>
@@ -135,42 +164,16 @@ Index: doc/_themes/blue/layout.html
 -                  {% if theme_lang == 'c' %}
 -                  {% endif %}
 -                  {% if theme_lang == 'cpp' %}
--                    <li>Try the <a href="http://opencv.willowgarage.com/wiki/Welcome?action=AttachFile&do=get&target=opencv_cheatsheet.pdf">Cheatsheet</a>.</li>
+-                    <li>Try the <a href="http://docs.opencv.org/trunk/opencv_cheatsheet.pdf">Cheatsheet</a>.</li>
 -                  {% endif %}
 -                  {% if theme_lang == 'py' %}
 -                    <li>Try the <a href="cookbook.html">Cookbook</a>.</li>
 -                  {% endif %}
--                  <li>Ask a question in the <a href="http://tech.groups.yahoo.com/group/OpenCV/">user group/mailing list</a>.</li>
+-                  <li>Ask a question on the <a href="http://answers.opencv.org">Q&A forum</a>.</li>
 -                  <li>If you think something is missing or wrong in the documentation,
--                  please file a <a href="https://code.ros.org/trac/opencv/wiki">bug report</a>.</li>
+-                  please file a <a href="http://code.opencv.org">bug report</a>.</li>
 -              </ul>
 -          </div>
        {%- if not embedded %}{% if not theme_nosidebar|tobool %}
          </div>
        {%- endif %}{% endif %}
-Index: doc/_themes/blue/theme.conf
-===================================================================
---- doc/_themes/blue/theme.conf	(revision 6876)
-+++ doc/_themes/blue/theme.conf	(working copy)
-@@ -4,6 +4,8 @@
- pygments_style = sphinx
- 
- [options]
-+embedded = true
-+nosidebar = true
- rightsidebar = false
- stickysidebar = false
- footerbgcolor    = #004068
-@@ -25,7 +27,7 @@
- feedbackbgcolor  = #004068
- feedbacktextcolor = #ffffff
- feedbacklinkcolor = #ffffff
--bodyfont = sans-serif
--headfont = 'Trebuchet MS', sans-serif
--guifont = "Lucida Sans","Lucida Sans Unicode","Lucida Grande",Verdana,Arial,Helvetica,sans-serif
--lang = none
-\ No newline at end of file
-+bodyfont = "Liberation Sans", "Verdana", sans-serif
-+headfont = "Liberation Sans", "Verdana", 'Trebuchet MS', sans-serif
-+guifont = "Liberation Sans", "Verdana", "Lucida Sans","Lucida Sans Unicode","Lucida Grande",,Arial,Helvetica,sans-serif
-+lang = none
