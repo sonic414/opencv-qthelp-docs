@@ -24,7 +24,7 @@ $ qcollectiongenerator doc/_qthelp/OpenCV.qhcp
 Open Qtcreator , Got to Tools > Options > Help > Documentation. Click Add , browse and select the .qch file
 
 
-[Screenshot](./screenshot.png)
+![Screenshot](./screenshot.png)
 
 
 NOTE: Only tested for archlinux - Needs the dependencies of opencv-docs package in AUR
